@@ -4,6 +4,11 @@ use core::slice;
 use std::fmt::{Display, Formatter, Write};
 use std::hint::black_box;
 
+pub use arguments_macro::*;
+
+#[cfg(feature = "web")]
+mod to_js;
+
 const fn min_size(slice: &'static [&'static str]) -> usize {
     let mut idx = 0;
     let mut size = 0;
@@ -44,16 +49,12 @@ impl<'a> DiffableArguments<'a> {
         {
             bump_str.write_str(static_seg).unwrap();
             match dynamic_seg {
-                Entry::U64(u) => {
+                Entry::U32(u) => {
                     u.write(unsafe { bump_str.as_mut_vec() });
                 }
-                Entry::Usize(u) => {
-                    u.write(unsafe { bump_str.as_mut_vec() });
-                }
-                Entry::I64(i) => {
+                Entry::I32(i) => {
                     i.write(unsafe { bump_str.as_mut_vec() });
                 }
-                Entry::F64(f) => bump_str.write_str(f.to_string().as_str()).unwrap(),
                 Entry::Bool(b) => match b {
                     true => {
                         bump_str.write_str("true").unwrap();
@@ -62,7 +63,6 @@ impl<'a> DiffableArguments<'a> {
                         bump_str.write_str("false").unwrap();
                     }
                 },
-                Entry::Char(c) => bump_str.write_char(*c).unwrap(),
                 Entry::Str(s) => bump_str.write_str(s).unwrap(),
             }
         }
@@ -99,12 +99,9 @@ impl PartialEq for DiffableArguments<'_> {
 
 #[derive(Debug)]
 pub enum Entry<'a> {
-    U64(u64),
-    Usize(usize),
-    I64(i64),
-    F64(f64),
+    U32(u32),
+    I32(i32),
     Bool(bool),
-    Char(char),
     Str(&'a str),
 }
 
@@ -122,84 +119,49 @@ impl<'a, T: Display> IntoEntry<'a> for &T {
 impl<'a> IntoEntry<'a> for &mut &&'a str {
     #[inline(always)]
     fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::Str(**self)
-    }
-}
-
-impl<'a> IntoEntry<'a> for &mut &u64 {
-    #[inline(always)]
-    fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::U64(**self)
+        Entry::Str(self)
     }
 }
 
 impl<'a> IntoEntry<'a> for &mut &u32 {
     #[inline(always)]
     fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::U64(**self as u64)
+        Entry::U32(**self)
     }
 }
 
 impl<'a> IntoEntry<'a> for &mut &u16 {
     #[inline(always)]
     fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::U64(**self as u64)
+        Entry::U32(**self as u32)
     }
 }
 
 impl<'a> IntoEntry<'a> for &mut &u8 {
     #[inline(always)]
     fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::U64(**self as u64)
-    }
-}
-
-impl<'a> IntoEntry<'a> for &mut &usize {
-    #[inline(always)]
-    fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::Usize(**self)
-    }
-}
-
-impl<'a> IntoEntry<'a> for &mut &i64 {
-    #[inline(always)]
-    fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::I64(**self)
+        Entry::U32(**self as u32)
     }
 }
 
 impl<'a> IntoEntry<'a> for &mut &i32 {
     #[inline(always)]
     fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::I64(**self as i64)
+        Entry::I32(**self)
     }
 }
 
 impl<'a> IntoEntry<'a> for &mut &i16 {
     #[inline(always)]
     fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::I64(**self as i64)
+        Entry::I32(**self as i32)
     }
 }
 
 impl<'a> IntoEntry<'a> for &mut &i8 {
     #[inline(always)]
     fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::I64(**self as i64)
-    }
-}
-
-impl<'a> IntoEntry<'a> for &mut &f64 {
-    #[inline(always)]
-    fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::F64(**self)
-    }
-}
-
-impl<'a> IntoEntry<'a> for &mut &f32 {
-    #[inline(always)]
-    fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::F64(**self as f64)
+        Entry::I32(**self as i32)
     }
 }
 
@@ -210,23 +172,13 @@ impl<'a> IntoEntry<'a> for &mut &bool {
     }
 }
 
-impl<'a> IntoEntry<'a> for &mut &char {
-    #[inline(always)]
-    fn into_entry(self, _bump: &'a Bump) -> Entry<'a> {
-        Entry::Char(**self)
-    }
-}
-
 impl PartialEq for Entry<'_> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::U64(l0), Self::U64(r0)) => l0 == r0,
-            (Self::Usize(l0), Self::Usize(r0)) => l0 == r0,
-            (Self::I64(l0), Self::I64(r0)) => l0 == r0,
-            (Self::F64(l0), Self::F64(r0)) => l0 == r0,
+            (Self::U32(l0), Self::U32(r0)) => l0 == r0,
+            (Self::I32(l0), Self::I32(r0)) => l0 == r0,
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
-            (Self::Char(l0), Self::Char(r0)) => l0 == r0,
-            (Self::Str(l0), Self::Str(r0)) => std::ptr::eq(l0, r0) || l0 == r0,
+            (Self::Str(l0), Self::Str(r0)) => std::ptr::eq(*l0, *r0) || l0 == r0,
             _ => false,
         }
     }
